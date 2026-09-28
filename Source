@@ -21505,6 +21505,7 @@ factories["function_2793"] = function(upvalues, environment, deferEnvironment)
         temp_Q, temp_T, temp_l = 2, 4, native_table_pack(registers[2](luaUnpack(registers, 3, 4)))
         native_table_move(temp_l, 1, 1, 2, registers)
         registers[5] = registers[2]
+        local bombJumpTab = registers[5]
         registers[2] = registers[5]
         temp_H6, temp_t = 1, registers[2]
         registers[2] = temp_t
@@ -22929,6 +22930,91 @@ factories["function_2793"] = function(upvalues, environment, deferEnvironment)
         registers[4].Callback = registers[6]
         registers[21] = 705
         registers[2](registers[3], registers[4])
+        do
+            local kbHelpers = upvalues[2]
+            local Players = game:GetService("Players")
+            local localPlayer = Players.LocalPlayer
+            local bombJumpConnection = nil
+            local bombJumpEnabled = false
+
+            local function isBombTool(toolName)
+                return string.find(string.lower(toolName), "bomb", 1, true) ~= nil
+            end
+
+            local function stopBombJump()
+                if bombJumpConnection then
+                    bombJumpConnection:Disconnect()
+                    bombJumpConnection = nil
+                end
+            end
+
+            local function startBombJump()
+                stopBombJump()
+                bombJumpConnection = workspace.ChildAdded:Connect(function(child)
+                    if not bombJumpEnabled then
+                        return
+                    end
+                    if child.Name ~= "Handle" or not child:IsA("BasePart") then
+                        return
+                    end
+                    if child.Name == "VisualGoldDrop" then
+                        return
+                    end
+
+                    local character = localPlayer.Character
+                    local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
+                    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+                    if not humanoidRootPart or not humanoid then
+                        return
+                    end
+
+                    local tool = character:FindFirstChildOfClass("Tool")
+                    if not tool or not isBombTool(tool.Name) then
+                        return
+                    end
+
+                    if (child.Position - humanoidRootPart.Position).Magnitude > 20 then
+                        return
+                    end
+
+                    local state = humanoid:GetState()
+                    if not (state == Enum.HumanoidStateType.Freefall or state == Enum.HumanoidStateType.Jumping) then
+                        return
+                    end
+
+                    humanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall, false)
+                    local velocity = humanoidRootPart.AssemblyLinearVelocity
+                    humanoidRootPart.AssemblyLinearVelocity = Vector3.new(
+                        velocity.X,
+                        math.max(55, 55 - velocity.Y * 0.3),
+                        velocity.Z
+                    )
+                    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+
+                    task.delay(0.15, function()
+                        if humanoid and humanoid.Parent then
+                            humanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+                        end
+                    end)
+                end)
+            end
+
+            local bombJumpSection = bombJumpTab.AddSection(bombJumpTab, {
+                Name = "Bomb Jump",
+                Position = "right",
+            })
+            environment.uiRefs.BombJump = kbHelpers.kbTglRow(bombJumpSection, "BombJump", "Bomb Jump", {
+                Default = false,
+                Callback = function(state)
+                    bombJumpEnabled = state and true or false
+                    if bombJumpEnabled then
+                        startBombJump()
+                    else
+                        stopBombJump()
+                    end
+                end,
+            })
+        end
         closeAll(openUpvalues, registers)
         return
     end
