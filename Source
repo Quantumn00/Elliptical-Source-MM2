@@ -23014,6 +23014,86 @@ factories["function_2793"] = function(upvalues, environment, deferEnvironment)
                     end
                 end,
             })
+            local RunService = game:GetService("RunService")
+            local wallhopConnection = nil
+            local wallhopBusy = false
+            local wallhopLastTime = 0
+            local wallhopLastWall = nil
+
+            local function doWallhop()
+                if wallhopBusy then
+                    return
+                end
+                wallhopBusy = true
+                local character = localPlayer.Character
+                local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+                local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
+                if not humanoid or not humanoidRootPart then
+                    wallhopBusy = false
+                    return
+                end
+                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                local velocity = humanoidRootPart.Velocity
+                humanoidRootPart.Velocity = Vector3.new(velocity.X, 50, velocity.Z)
+                local currentCamera = workspace.CurrentCamera
+                local cameraCFrame = currentCamera.CFrame
+                currentCamera.CFrame = cameraCFrame * CFrame.Angles(0, math.pi, 0)
+                task.wait(0.01)
+                currentCamera.CFrame = cameraCFrame
+                wallhopBusy = false
+            end
+
+            local function stopAutoWallhop()
+                if wallhopConnection then
+                    wallhopConnection:Disconnect()
+                    wallhopConnection = nil
+                end
+                wallhopLastWall = nil
+                wallhopBusy = false
+            end
+
+            local function startAutoWallhop()
+                stopAutoWallhop()
+                wallhopConnection = RunService.Heartbeat:Connect(function()
+                    local character = localPlayer.Character
+                    local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
+                    if not humanoidRootPart then
+                        return
+                    end
+                    local currentCamera = workspace.CurrentCamera
+                    local raycastParams = RaycastParams.new()
+                    raycastParams.FilterDescendantsInstances = { character }
+                    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+                    local hit = workspace:Raycast(humanoidRootPart.Position, currentCamera.CFrame.LookVector * 3, raycastParams)
+
+                    if hit and hit.Instance and hit.Instance.CanCollide then
+                        if wallhopLastWall and wallhopLastWall ~= hit.Instance then
+                            if tick() - wallhopLastTime > 0.05 then
+                                wallhopLastTime = tick()
+                                task.spawn(doWallhop)
+                            end
+                        end
+                        wallhopLastWall = hit.Instance
+                    else
+                        wallhopLastWall = nil
+                    end
+                end)
+            end
+
+            local autoWallhopSection = bombJumpTab.AddSection(bombJumpTab, {
+                Name = "Auto Wallhop",
+                Position = "right",
+            })
+            environment.uiRefs.AutoWallhop = kbHelpers.kbTglRow(autoWallhopSection, "AutoWallhop", "Auto Wallhop", {
+                Default = false,
+                Callback = function(state)
+                    if state then
+                        startAutoWallhop()
+                    else
+                        stopAutoWallhop()
+                    end
+                end,
+            })
         end
         closeAll(openUpvalues, registers)
         return
