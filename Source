@@ -52273,6 +52273,242 @@ factories["function_6545"] = function(upvalues, environment, deferEnvironment)
         temp_t, temp_N = 3, 0
         temp_Q, temp_l = 1, native_table_pack(registers[2](luaUnpack(registers, 3, 5)))
         native_table_move(temp_l, 1, 0, 2, registers)
+        do
+            local configSection = registers[3]
+            local notifier = upvalues[6]
+            local refreshConfigList = registers[13]
+            local shareCaptures
+            shareCaptures, openUpvalues = buildCaptures(registers, upvalues, openUpvalues, {0, 11}, 1)
+            local selectedConfigCell = shareCaptures[1]
+            local pendingImportKey = ""
+            local exportCounter = 0
+
+            local string, math, os, table = environment.string, environment.math, environment.os, environment.table
+            local tostring, tonumber, pcall, print = environment.tostring, environment.tonumber, environment.pcall, environment.print
+
+            local function notify(content)
+                pcall(notifier.new, {Title = "Config", Content = content, Duration = 3})
+            end
+
+            local function checksum(data)
+                local hash = 7
+                for i = 1, #data do
+                    hash = (hash * 31 + string.byte(data, i)) % 9999991
+                end
+                return hash % 10000
+            end
+
+            local function lzwCompress(input)
+                local dictionary, dictionarySize = {}, 256
+                for i = 0, 255 do
+                    dictionary[string.char(i)] = i
+                end
+                local codes, current = {}, ""
+                for i = 1, #input do
+                    local char = string.sub(input, i, i)
+                    local combined = current .. char
+                    if dictionary[combined] then
+                        current = combined
+                    else
+                        codes[#codes + 1] = dictionary[current]
+                        dictionary[combined] = dictionarySize
+                        dictionarySize += 1
+                        current = char
+                    end
+                end
+                if current ~= "" then
+                    codes[#codes + 1] = dictionary[current]
+                end
+                return codes
+            end
+
+            local function lzwDecompress(codes)
+                if #codes == 0 then
+                    return ""
+                end
+                local dictionary, dictionarySize = {}, 256
+                for i = 0, 255 do
+                    dictionary[i] = string.char(i)
+                end
+                local previous = dictionary[codes[1]]
+                if not previous then
+                    return nil
+                end
+                local output = {previous}
+                for i = 2, #codes do
+                    local code = codes[i]
+                    local entry
+                    if dictionary[code] then
+                        entry = dictionary[code]
+                    elseif code == dictionarySize then
+                        entry = previous .. string.sub(previous, 1, 1)
+                    else
+                        return nil
+                    end
+                    output[#output + 1] = entry
+                    dictionary[dictionarySize] = previous .. string.sub(entry, 1, 1)
+                    dictionarySize += 1
+                    previous = entry
+                end
+                return table.concat(output)
+            end
+
+            -- Each code is written with a width that both sides can derive from its index,
+            -- so the payload stays pure digits without separators.
+            local function codeWidth(index)
+                return #tostring(256 + index)
+            end
+
+            local function codesToDigits(codes)
+                local parts = {}
+                for index, code in environment.ipairs(codes) do
+                    parts[index] = string.format("%0" .. codeWidth(index) .. "d", code)
+                end
+                return table.concat(parts)
+            end
+
+            local function digitsToCodes(digits)
+                local codes, position, index = {}, 1, 0
+                while position <= #digits do
+                    index += 1
+                    local width = codeWidth(index)
+                    local chunk = string.sub(digits, position, position + width - 1)
+                    if #chunk ~= width then
+                        return nil
+                    end
+                    codes[index] = tonumber(chunk)
+                    position += width
+                end
+                return codes
+            end
+
+            local function getSelectedConfigName()
+                local name = selectedConfigCell[6][selectedConfigCell[3]]
+                if not name or name == "" then
+                    name = "default"
+                end
+                return (string.gsub(tostring(name), "%.json$", ""))
+            end
+
+            local function configPath(name)
+                return environment.configFolder .. "/" .. name .. ".json"
+            end
+
+            local function buildKey(name, contents)
+                local payload = name .. "\n" .. contents
+                exportCounter += 1
+                local uniqueId = string.format(
+                    "%06d%04d%04d",
+                    (os.time() + exportCounter) % 1000000,
+                    math.random(0, 9999),
+                    checksum(payload)
+                )
+                return "Elliptical-" .. uniqueId .. "-" .. codesToDigits(lzwCompress(payload))
+            end
+
+            local function parseKey(rawKey)
+                local key = string.gsub(tostring(rawKey or ""), "%s", "")
+                local uniqueId, digits = string.match(key, "^Elliptical%-(%d+)%-(%d+)$")
+                if not uniqueId or #uniqueId < 4 then
+                    return nil, "Invalid key format!"
+                end
+                local codes = digitsToCodes(digits)
+                local payload = codes and lzwDecompress(codes)
+                if not payload then
+                    return nil, "Corrupted config key!"
+                end
+                if tonumber(string.sub(uniqueId, -4)) ~= checksum(payload) then
+                    return nil, "Config key checksum mismatch!"
+                end
+                local separator = string.find(payload, "\n", 1, true)
+                if not separator then
+                    return nil, "Corrupted config key!"
+                end
+                return string.sub(payload, 1, separator - 1), string.sub(payload, separator + 1)
+            end
+
+            local function exportSelectedConfig()
+                if not environment.readfile or not environment.isfile then
+                    notify("Your executor doesn't support reading files!")
+                    return
+                end
+                local name = getSelectedConfigName()
+                local path = configPath(name)
+                if not environment.isfile(path) then
+                    notify("Config file not found!")
+                    return
+                end
+                local readOk, contents = pcall(environment.readfile, path)
+                if not readOk or not contents or contents == "" then
+                    notify("Corrupted config file!")
+                    return
+                end
+                local key = buildKey(name, contents)
+                local clipboard = environment.setclipboard or environment.toclipboard
+                if clipboard and pcall(clipboard, key) then
+                    notify("Exported '" .. name .. "' - key copied to clipboard!")
+                else
+                    print("[Elliptical] Config key for '" .. name .. "':\n" .. key)
+                    notify("Clipboard unsupported - key printed to console (F9).")
+                end
+            end
+
+            local function importConfigFromKey()
+                if not environment.writefile or not environment.isfile then
+                    notify("Your executor doesn't support writing files!")
+                    return
+                end
+                local originalName, contents = parseKey(pendingImportKey)
+                if not originalName then
+                    notify(contents)
+                    return
+                end
+                local httpService = environment.game:GetService("HttpService")
+                if not pcall(httpService.JSONDecode, httpService, contents) then
+                    notify("Config key contains invalid data!")
+                    return
+                end
+                local baseName = string.gsub(originalName, "[^%w%s%-_]", "")
+                if baseName == "" then
+                    baseName = "imported"
+                end
+                local finalName, suffix = baseName, 1
+                while environment.isfile(configPath(finalName)) do
+                    suffix += 1
+                    finalName = baseName .. "_" .. suffix
+                end
+                if environment.makefolder and environment.isfolder and not environment.isfolder(environment.configFolder) then
+                    pcall(environment.makefolder, environment.configFolder)
+                end
+                if not pcall(environment.writefile, configPath(finalName), contents) then
+                    notify("Failed to save config!")
+                    return
+                end
+                if refreshConfigList then
+                    pcall(refreshConfigList, true)
+                end
+                notify("Imported config saved as '" .. finalName .. "'")
+            end
+
+            configSection:AddLabel("Share Config")
+            configSection:AddButton({
+                Name = "Export Config",
+                Icon = "cloud",
+                Callback = exportSelectedConfig,
+            })
+            configSection:AddLabel("Import Key"):AddTextInput({
+                Default = "",
+                Placeholder = "Elliptical-...",
+                Callback = function(text)
+                    pendingImportKey = text
+                end,
+            })
+            configSection:AddButton({
+                Name = "Import Config",
+                Icon = "folder",
+                Callback = importConfigFromKey,
+            })
+        end
         closeAll(openUpvalues, registers)
         return
     end
