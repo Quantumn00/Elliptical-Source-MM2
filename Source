@@ -5524,7 +5524,7 @@ factories["function_1219"] = function(upvalues, environment, deferEnvironment)
         do
             local local_86, local_87 = {0, 28}, upvalues
             local local_88 = ((local_86 and ((# local_86) / 2)) or 0)
-            local local_89, local_90 = (buildCaptures)(registers, local_87, openUpvalues, local_86, local_88)
+      local local_89, local_90 = (buildCaptures)(registers, local_87, openUpvalues, local_86, local_88)
             temp_N = factories["function_3072"](local_89, environment, true)
             setEnvironment(temp_N, environment)
             registers[29] = temp_N
@@ -89610,6 +89610,658 @@ factories["runMM2"] = function(upvalues, environment, deferEnvironment)
         temp_Q, temp_l = 70, native_table_pack(registers[70](luaUnpack(registers, 71, 72)))
         native_table_move(temp_l, 1, 1, 70, registers)
         registers[4].GenTab = registers[70]
+        do
+            local chatWindow = registers[2]
+            local string, table, math, os = environment.string, environment.table, environment.math, environment.os
+            local tostring, pcall, ipairs, type = environment.tostring, environment.pcall, environment.ipairs, environment.type
+            local task, game = environment.task, environment.game
+            local Instance, UDim2, UDim, Vector2 = environment.Instance, environment.UDim2, environment.UDim, environment.Vector2
+            local Color3, Enum, pairs, tonumber = environment.Color3, environment.Enum, environment.pairs, environment.tonumber
+
+            local CHAT_TOPIC = "elliptical-mm2-global-chat-v1"
+            local CHAT_URL = "https://ntfy.sh/" .. CHAT_TOPIC
+            local MAX_HISTORY = 100
+            local MAX_MESSAGE_LENGTH = 150
+            local SEND_COOLDOWN = 2
+            local POLL_INTERVAL = 3
+
+            -- Matched anywhere inside the normalized text.
+            local blockedRoots = {
+                "nigger", "nigga", "niga", "nigr", "faggot", "fagot", "retard",
+                "kike", "beaner", "wetback", "tranny", "chingchong", "raghead",
+                "towelhead", "sandnigger", "porchmonkey", "junglebunny",
+            }
+            -- Matched only as whole words, since they appear inside normal words.
+            local blockedWords = {
+                fag = true, fags = true, spic = true, spics = true, chink = true, chinks = true,
+                coon = true, coons = true, gook = true, gooks = true, kys = true, nig = true,
+                negro = true, dyke = true, paki = true,
+            }
+            local leetMap = {
+                ["0"] = "o", ["1"] = "i", ["3"] = "e", ["4"] = "a", ["5"] = "s", ["7"] = "t",
+                ["8"] = "b", ["9"] = "g", ["@"] = "a", ["$"] = "s", ["!"] = "i", ["|"] = "i", ["+"] = "t",
+            }
+
+            local function collapseRepeats(text)
+                return (string.gsub(text, "(%a)%1+", "%1"))
+            end
+
+            for index, root in ipairs(blockedRoots) do
+                blockedRoots[index] = collapseRepeats(root)
+            end
+            local collapsedWords = {}
+            for word in environment.pairs(blockedWords) do
+                collapsedWords[collapseRepeats(word)] = true
+            end
+
+            local function normalize(text)
+                local lowered = string.lower(tostring(text or ""))
+                lowered = string.gsub(lowered, ".", function(char)
+                    return leetMap[char] or char
+                end)
+                return lowered
+            end
+
+            local function isOffensive(text)
+                local normalized = normalize(text)
+                local squashed = collapseRepeats((string.gsub(normalized, "[^%a]", "")))
+                for _, root in ipairs(blockedRoots) do
+                    if string.find(squashed, root, 1, true) then
+                        return true
+                    end
+                end
+                for word in string.gmatch(normalized, "%a+") do
+                    if collapsedWords[collapseRepeats(word)] then
+                        return true
+                    end
+                end
+                return false
+            end
+
+            local function getRequestFunction()
+                local syn, http, fluxus = environment.syn, environment.http, environment.fluxus
+                return environment.request
+                    or environment.http_request
+                    or (syn and syn.request)
+                    or (http and http.request)
+                    or (fluxus and fluxus.request)
+            end
+
+            local function sanitize(text, maxLength)
+                local cleaned = string.gsub(tostring(text or ""), "[%c]", " ")
+                cleaned = string.gsub(cleaned, "[<>]", "")
+                cleaned = string.gsub(cleaned, "^%s+", "")
+                cleaned = string.gsub(cleaned, "%s+$", "")
+                return string.sub(cleaned, 1, maxLength)
+            end
+
+            local function getLocalIdentity()
+                local ok, identity = pcall(function()
+                    local player = game:GetService("Players").LocalPlayer
+                    return {
+                        username = player.Name,
+                        userId = player.UserId,
+                    }
+                end)
+                if not ok or type(identity) ~= "table" then
+                    return {username = "Player", userId = nil}
+                end
+                identity.username = sanitize(identity.username, 20)
+                return identity
+            end
+
+            task.defer(function()
+                local okTab, chatTab = pcall(chatWindow.AddTab, chatWindow, {Name = "Chat", Icon = "speaker"})
+                if not okTab or not chatTab then
+                    return
+                end
+                local pageContent
+                local contentOk = pcall(function()
+                    pageContent = chatTab.Page.Items.PageContent.Instance
+                end)
+                if not contentOk or not pageContent then
+                    return
+                end
+
+                local history = {}
+                local renderedRows = {}
+                local seenIds = {}
+                local lastMessageId = nil
+                local lastSendTime = 0
+                local httpService = game:GetService("HttpService")
+                local playersService = game:GetService("Players")
+                local localIdentity = getLocalIdentity()
+
+                local currentTheme = type(chatWindow.Theme) == "table" and chatWindow.Theme or {}
+                local function themeColor(name, fallback)
+                    return currentTheme[name] or fallback
+                end
+                local themeBackground = themeColor("Background", Color3.fromRGB(12, 16, 24))
+                local themeText = themeColor("Text", Color3.fromRGB(246, 237, 228))
+                local palette = {
+                    background = themeBackground,
+                    surface = themeColor("Element", Color3.fromRGB(44, 31, 34)),
+                    surfaceRaised = themeColor("Inline", Color3.fromRGB(28, 22, 27)),
+                    input = themeColor("Inline", Color3.fromRGB(28, 22, 27)),
+                    border = themeColor("Border", Color3.fromRGB(104, 40, 44)),
+                    text = themeText,
+                    muted = themeText:Lerp(themeBackground, 0.34),
+                    accent = themeColor("Accent", Color3.fromRGB(213, 78, 54)),
+                    green = Color3.fromRGB(67, 181, 129),
+                    amber = Color3.fromRGB(250, 166, 26),
+                }
+
+                local function create(className, parent, properties)
+                    local instance = Instance.new(className)
+                    for property, value in pairs(properties or {}) do
+                        instance[property] = value
+                    end
+                    instance.Parent = parent
+                    return instance
+                end
+
+                local chatRoot = create("Frame", pageContent, {
+                    Name = "GlobalChatSurface",
+                    Position = UDim2.new(0, 12, 0, 14),
+                    Size = UDim2.new(1, -24, 1, -28),
+                    BackgroundColor3 = palette.background,
+                    BorderSizePixel = 0,
+                    ClipsDescendants = true,
+                    ZIndex = 20,
+                })
+                create("UICorner", chatRoot, {CornerRadius = UDim.new(0, 12)})
+                create("UIStroke", chatRoot, {
+                    Color = palette.border,
+                    Transparency = 0.25,
+                    Thickness = 1,
+                })
+
+                local header = create("Frame", chatRoot, {
+                    Name = "ChatHeader",
+                    Position = UDim2.new(0, 10, 0, 10),
+                    Size = UDim2.new(1, -20, 0, 56),
+                    BackgroundColor3 = palette.surface,
+                    BorderSizePixel = 0,
+                    ZIndex = 21,
+                })
+                create("UICorner", header, {CornerRadius = UDim.new(0, 9)})
+
+                create("TextLabel", header, {
+                    Name = "ChatTitle",
+                    Position = UDim2.new(0, 15, 0, 7),
+                    Size = UDim2.new(0.56, -12, 0, 22),
+                    BackgroundTransparency = 1,
+                    Font = Enum.Font.GothamBold,
+                    Text = "Global chat",
+                    TextColor3 = palette.text,
+                    TextSize = 17,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    ZIndex = 22,
+                })
+                create("TextLabel", header, {
+                    Name = "ChatSubtitle",
+                    Position = UDim2.new(0, 15, 0, 31),
+                    Size = UDim2.new(0.72, -18, 0, 16),
+                    BackgroundTransparency = 1,
+                    Font = Enum.Font.Gotham,
+                    Text = "Sender-provided usernames and avatar IDs",
+                    TextColor3 = palette.muted,
+                    TextSize = 11,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    ZIndex = 22,
+                })
+
+                local statusDot = create("Frame", header, {
+                    Name = "ConnectionDot",
+                    Position = UDim2.new(1, -153, 0.5, -4),
+                    Size = UDim2.new(0, 8, 0, 8),
+                    BackgroundColor3 = palette.amber,
+                    BorderSizePixel = 0,
+                    ZIndex = 22,
+                })
+                create("UICorner", statusDot, {CornerRadius = UDim.new(1, 0)})
+                local statusLabel = create("TextLabel", header, {
+                    Name = "ConnectionStatus",
+                    Position = UDim2.new(1, -140, 0.5, -9),
+                    Size = UDim2.new(0, 75, 0, 18),
+                    BackgroundTransparency = 1,
+                    Font = Enum.Font.GothamMedium,
+                    Text = "CONNECTING",
+                    TextColor3 = palette.muted,
+                    TextSize = 10,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    ZIndex = 22,
+                })
+                local clearButton = create("TextButton", header, {
+                    Name = "ClearLocalHistory",
+                    Position = UDim2.new(1, -62, 0.5, -15),
+                    Size = UDim2.new(0, 50, 0, 30),
+                    BackgroundColor3 = palette.surfaceRaised,
+                    BorderSizePixel = 0,
+                    AutoButtonColor = true,
+                    Font = Enum.Font.GothamMedium,
+                    Text = "Clear",
+                    TextColor3 = palette.text,
+                    TextSize = 11,
+                    ZIndex = 22,
+                })
+                create("UICorner", clearButton, {CornerRadius = UDim.new(0, 7)})
+
+                local messageList = create("ScrollingFrame", chatRoot, {
+                    Name = "Messages",
+                    Position = UDim2.new(0, 10, 0, 76),
+                    Size = UDim2.new(1, -20, 1, -150),
+                    BackgroundTransparency = 1,
+                    BorderSizePixel = 0,
+                    ScrollBarThickness = 4,
+                    ScrollBarImageColor3 = palette.border,
+                    CanvasSize = UDim2.new(0, 0, 0, 0),
+                    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+                    ScrollingDirection = Enum.ScrollingDirection.Y,
+                    Active = true,
+                    ZIndex = 21,
+                })
+                create("UIPadding", messageList, {
+                    PaddingTop = UDim.new(0, 3),
+                    PaddingBottom = UDim.new(0, 8),
+                    PaddingLeft = UDim.new(0, 2),
+                    PaddingRight = UDim.new(0, 7),
+                })
+                create("UIListLayout", messageList, {
+                    SortOrder = Enum.SortOrder.LayoutOrder,
+                    Padding = UDim.new(0, 8),
+                })
+                local emptyState = create("TextLabel", messageList, {
+                    Name = "EmptyState",
+                    Size = UDim2.new(1, -4, 0, 52),
+                    BackgroundTransparency = 1,
+                    Font = Enum.Font.Gotham,
+                    Text = "No messages yet. Say hello to start the conversation.",
+                    TextColor3 = palette.muted,
+                    TextSize = 13,
+                    TextWrapped = true,
+                    ZIndex = 22,
+                })
+
+                local composer = create("Frame", chatRoot, {
+                    Name = "Composer",
+                    Position = UDim2.new(0, 10, 1, -62),
+                    Size = UDim2.new(1, -20, 0, 52),
+                    BackgroundColor3 = palette.surface,
+                    BorderSizePixel = 0,
+                    ZIndex = 21,
+                })
+                create("UICorner", composer, {CornerRadius = UDim.new(0, 9)})
+                create("UIStroke", composer, {
+                    Color = palette.border,
+                    Transparency = 0.35,
+                    Thickness = 1,
+                })
+                local messageInput = create("TextBox", composer, {
+                    Name = "MessageInput",
+                    Position = UDim2.new(0, 12, 0, 7),
+                    Size = UDim2.new(1, -112, 1, -14),
+                    BackgroundColor3 = palette.input,
+                    BorderSizePixel = 0,
+                    ClearTextOnFocus = false,
+                    Font = Enum.Font.Gotham,
+                    PlaceholderText = "Message the chat...",
+                    PlaceholderColor3 = palette.muted,
+                    Text = "",
+                    TextColor3 = palette.text,
+                    TextSize = 13,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    ZIndex = 22,
+                })
+                create("UICorner", messageInput, {CornerRadius = UDim.new(0, 7)})
+                create("UIPadding", messageInput, {
+                    PaddingLeft = UDim.new(0, 11),
+                    PaddingRight = UDim.new(0, 8),
+                })
+                local sendButton = create("TextButton", composer, {
+                    Name = "SendMessage",
+                    Position = UDim2.new(1, -88, 0, 7),
+                    Size = UDim2.new(0, 76, 1, -14),
+                    BackgroundColor3 = palette.accent,
+                    BorderSizePixel = 0,
+                    AutoButtonColor = true,
+                    Font = Enum.Font.GothamBold,
+                    Text = "Send",
+                    TextColor3 = Color3.fromRGB(255, 255, 255),
+                    TextSize = 12,
+                    ZIndex = 22,
+                })
+                create("UICorner", sendButton, {CornerRadius = UDim.new(0, 7)})
+
+                local function setStatus(text, connected)
+                    statusLabel.Text = text
+                    statusDot.BackgroundColor3 = connected and palette.green or palette.amber
+                end
+
+                local avatarCache = {}
+                local avatarRequests = {}
+                local function loadAvatar(avatar, userId)
+                    userId = tonumber(userId)
+                    if not userId or userId <= 0 or userId % 1 ~= 0 then
+                        return
+                    end
+                    local cachedImage = avatarCache[userId]
+                    if cachedImage then
+                        avatar.Image = cachedImage
+                        return
+                    end
+                    if avatarRequests[userId] then
+                        table.insert(avatarRequests[userId], avatar)
+                        return
+                    end
+                    avatarRequests[userId] = {avatar}
+                    task.spawn(function()
+                        local imageContent
+                        for attempt = 1, 4 do
+                            local ok, content, isReady = pcall(function()
+                                return playersService:GetUserThumbnailAsync(
+                                    userId,
+                                    Enum.ThumbnailType.HeadShot,
+                                    Enum.ThumbnailSize.Size150x150
+                                )
+                            end)
+                            if ok and type(content) == "string" and content ~= "" then
+                                imageContent = content
+                                for _, targetAvatar in ipairs(avatarRequests[userId] or {}) do
+                                    if targetAvatar.Parent then
+                                        targetAvatar.Image = imageContent
+                                    end
+                                end
+                                if isReady then
+                                    break
+                                end
+                            end
+                            if attempt < 4 then
+                                task.wait(0.35)
+                            end
+                        end
+                        if not imageContent then
+                            imageContent = "rbxthumb://type=AvatarHeadShot&id=" .. tostring(userId) .. "&w=150&h=150"
+                            for _, targetAvatar in ipairs(avatarRequests[userId] or {}) do
+                                if targetAvatar.Parent then
+                                    targetAvatar.Image = imageContent
+                                end
+                            end
+                        end
+                        avatarCache[userId] = imageContent
+                        avatarRequests[userId] = nil
+                    end)
+                end
+
+                local function addMessageRow(message)
+                    local row = create("Frame", messageList, {
+                        Name = "MessageRow",
+                        Size = UDim2.new(1, -4, 0, 62),
+                        AutomaticSize = Enum.AutomaticSize.Y,
+                        BackgroundColor3 = palette.surface,
+                        BorderSizePixel = 0,
+                        LayoutOrder = #renderedRows + 1,
+                        ZIndex = 22,
+                    })
+                    create("UICorner", row, {CornerRadius = UDim.new(0, 9)})
+                    create("UIStroke", row, {
+                        Color = palette.border,
+                        Transparency = 0.48,
+                        Thickness = 1,
+                    })
+
+                    local avatarBase = create("Frame", row, {
+                        Name = "AvatarBase",
+                        Position = UDim2.new(0, 11, 0, 10),
+                        Size = UDim2.new(0, 40, 0, 40),
+                        BackgroundColor3 = palette.accent,
+                        BorderSizePixel = 0,
+                        ZIndex = 23,
+                    })
+                    create("UICorner", avatarBase, {CornerRadius = UDim.new(1, 0)})
+                    create("TextLabel", avatarBase, {
+                        Name = "InitialFallback",
+                        Size = UDim2.new(1, 0, 1, 0),
+                        BackgroundTransparency = 1,
+                        Font = Enum.Font.GothamBold,
+                        Text = string.upper(string.sub(message.author or "?", 1, 1)),
+                        TextColor3 = palette.text,
+                        TextSize = 15,
+                        ZIndex = 24,
+                    })
+                    local avatar = create("ImageLabel", avatarBase, {
+                        Name = "RobloxAvatar",
+                        Size = UDim2.new(1, 0, 1, 0),
+                        BackgroundTransparency = 1,
+                        BorderSizePixel = 0,
+                        Image = "",
+                        ScaleType = Enum.ScaleType.Crop,
+                        ZIndex = 25,
+                    })
+                    create("UICorner", avatar, {CornerRadius = UDim.new(1, 0)})
+                    loadAvatar(avatar, message.userId)
+
+                    create("TextLabel", row, {
+                        Name = "Username",
+                        Position = UDim2.new(0, 61, 0, 10),
+                        Size = UDim2.new(1, -156, 0, 18),
+                        BackgroundTransparency = 1,
+                        Font = Enum.Font.GothamBold,
+                        Text = "@" .. (message.author or "Anonymous"),
+                        TextColor3 = palette.text,
+                        TextSize = 12,
+                        TextTruncate = Enum.TextTruncate.AtEnd,
+                        TextXAlignment = Enum.TextXAlignment.Left,
+                        ZIndex = 24,
+                    })
+                    create("TextLabel", row, {
+                        Name = "Timestamp",
+                        Position = UDim2.new(1, -82, 0, 10),
+                        Size = UDim2.new(0, 70, 0, 17),
+                        BackgroundTransparency = 1,
+                        Font = Enum.Font.Gotham,
+                        Text = message.stamp or "--:--",
+                        TextColor3 = palette.muted,
+                        TextSize = 10,
+                        TextXAlignment = Enum.TextXAlignment.Right,
+                        ZIndex = 24,
+                    })
+                    create("TextLabel", row, {
+                        Name = "MessageText",
+                        Position = UDim2.new(0, 61, 0, 31),
+                        Size = UDim2.new(1, -75, 0, 0),
+                        AutomaticSize = Enum.AutomaticSize.Y,
+                        BackgroundTransparency = 1,
+                        Font = Enum.Font.Gotham,
+                        Text = message.text,
+                        TextColor3 = palette.muted,
+                        TextSize = 12,
+                        TextWrapped = true,
+                        TextXAlignment = Enum.TextXAlignment.Left,
+                        TextYAlignment = Enum.TextYAlignment.Top,
+                        ZIndex = 24,
+                    })
+                    table.insert(renderedRows, row)
+                end
+
+                local function render()
+                    for _, row in ipairs(renderedRows) do
+                        pcall(function()
+                            row:Destroy()
+                        end)
+                    end
+                    renderedRows = {}
+                    local startIndex = math.max(1, #history - MAX_HISTORY + 1)
+                    for index = startIndex, #history do
+                        addMessageRow(history[index])
+                    end
+                    emptyState.Visible = #history == 0
+                    task.defer(function()
+                        if messageList and messageList.Parent then
+                            messageList.CanvasPosition = Vector2.new(0, messageList.AbsoluteCanvasSize.Y)
+                        end
+                    end)
+                end
+
+                local function handleIncoming(entry)
+                    if type(entry) ~= "table" or entry.event ~= "message" or not entry.id then
+                        return
+                    end
+                    local messageId = tostring(entry.id)
+                    if seenIds[messageId] then
+                        return
+                    end
+                    seenIds[messageId] = true
+                    lastMessageId = messageId
+
+                    local author = sanitize(entry.title or "Anonymous", 20)
+                    local text = tostring(entry.message or "")
+                    local userId = nil
+                    local decoded, payload = pcall(httpService.JSONDecode, httpService, text)
+                    if decoded and type(payload) == "table" and payload.version == 1 then
+                        author = sanitize(payload.username or author, 20)
+                        text = tostring(payload.text or "")
+                        userId = tonumber(payload.userId)
+                        if not userId or userId <= 0 or userId % 1 ~= 0 or userId > 9007199254740991 then
+                            userId = nil
+                        end
+                    end
+                    text = sanitize(text, MAX_MESSAGE_LENGTH)
+                    if text == "" then
+                        return
+                    end
+                    if isOffensive(text) or isOffensive(author) then
+                        text = "[message removed by filter]"
+                        if isOffensive(author) then
+                            author = "Anonymous"
+                            userId = nil
+                        end
+                    end
+
+                    local stamp = "--:--"
+                    if type(entry.time) == "number" then
+                        local stampOk, value = pcall(os.date, "%H:%M", entry.time)
+                        if stampOk then
+                            stamp = value
+                        end
+                    end
+                    history[#history + 1] = {
+                        author = author,
+                        userId = userId,
+                        text = text,
+                        stamp = stamp,
+                    }
+                    while #history > MAX_HISTORY do
+                        table.remove(history, 1)
+                    end
+                    render()
+                end
+
+                local requestFunction = getRequestFunction()
+                local function poll()
+                    if not requestFunction then
+                        return false
+                    end
+                    local since = lastMessageId or "15m"
+                    local ok, response = pcall(requestFunction, {
+                        Url = CHAT_URL .. "/json?poll=1&since=" .. since,
+                        Method = "GET",
+                    })
+                    if not ok or not response or not response.Body or (response.StatusCode and response.StatusCode >= 400) then
+                        return false
+                    end
+                    for line in string.gmatch(response.Body, "[^\n]+") do
+                        local decoded, entry = pcall(httpService.JSONDecode, httpService, line)
+                        if decoded then
+                            pcall(handleIncoming, entry)
+                        end
+                    end
+                    return true
+                end
+
+                local function sendMessage()
+                    if not requestFunction then
+                        setStatus("HTTP unavailable", false)
+                        return
+                    end
+                    local text = sanitize(messageInput.Text, MAX_MESSAGE_LENGTH)
+                    if text == "" then
+                        setStatus("Type a message first", false)
+                        return
+                    end
+                    local now = os.clock()
+                    if now - lastSendTime < SEND_COOLDOWN then
+                        setStatus("Wait a moment", false)
+                        return
+                    end
+                    if isOffensive(text) then
+                        setStatus("Message blocked by filter", false)
+                        return
+                    end
+
+                    local bodyOk, body = pcall(httpService.JSONEncode, httpService, {
+                        version = 1,
+                        username = localIdentity.username,
+                        userId = localIdentity.userId,
+                        text = text,
+                    })
+                    if not bodyOk then
+                        setStatus("Could not format message", false)
+                        return
+                    end
+                    lastSendTime = now
+                    local ok, response = pcall(requestFunction, {
+                        Url = CHAT_URL,
+                        Method = "POST",
+                        Headers = {
+                            ["Title"] = localIdentity.username,
+                            ["Content-Type"] = "application/json",
+                        },
+                        Body = body,
+                    })
+                    if not ok or not response or (response.StatusCode and response.StatusCode >= 400) then
+                        setStatus("Message failed to send", false)
+                        return
+                    end
+                    messageInput.Text = ""
+                    setStatus("Message sent", true)
+                    task.delay(0.5, poll)
+                end
+
+                sendButton.Activated:Connect(sendMessage)
+                messageInput.FocusLost:Connect(function(enterPressed)
+                    if enterPressed then
+                        sendMessage()
+                    end
+                end)
+                clearButton.Activated:Connect(function()
+                    history = {}
+                    render()
+                    setStatus("Local history cleared", requestFunction ~= nil)
+                end)
+
+                if not requestFunction then
+                    setStatus("HTTP unavailable", false)
+                    emptyState.Text = "This environment does not support HTTP requests."
+                    return
+                end
+                if poll() then
+                    setStatus("LIVE", true)
+                else
+                    setStatus("RECONNECTING", false)
+                end
+
+                while chatRoot.Parent do
+                    task.wait(POLL_INTERVAL)
+                    local pollOk, connected = pcall(poll)
+                    if not pollOk or not connected then
+                        setStatus("RECONNECTING", false)
+                    else
+                        setStatus("LIVE", true)
+                    end
+                end
+            end)
+        end
         registers[404] = 18195
         registers[3] = environment.pcall
         do
